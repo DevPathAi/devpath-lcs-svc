@@ -148,6 +148,35 @@ class LcsServiceTest {
   }
 
   @Test
+  void byQuestionReturnsCommittedSnapshotForAnswerer() {
+    LearningContextSnapshot e =
+        mockEntity(7L, 42L, "answerers_only", "{\"current_content\":{\"title\":\"t\"}}");
+    when(snapshots.findFirstByAttachedToTypeAndAttachedToIdOrderByCreatedAtDesc("question", 5L))
+        .thenReturn(Optional.of(e));
+
+    SnapshotView view = service.getSnapshotByQuestion(99L, 5L);
+
+    assertEquals(7L, view.id());
+    assertEquals("answerer", view.renderedFor());
+    assertTrue(view.content().containsKey("current_content"));
+  }
+
+  @Test
+  void byQuestionMissingThrowsNotFound() {
+    when(snapshots.findFirstByAttachedToTypeAndAttachedToIdOrderByCreatedAtDesc("question", 123L))
+        .thenReturn(Optional.empty());
+    assertThrows(NotFoundException.class, () -> service.getSnapshotByQuestion(1L, 123L));
+  }
+
+  @Test
+  void byQuestionPrivateNonOwnerForbidden() {
+    LearningContextSnapshot e = mockEntity(7L, 42L, "private", "{}");
+    when(snapshots.findFirstByAttachedToTypeAndAttachedToIdOrderByCreatedAtDesc("question", 5L))
+        .thenReturn(Optional.of(e));
+    assertThrows(ForbiddenException.class, () -> service.getSnapshotByQuestion(99L, 5L));
+  }
+
+  @Test
   void getPreferencesReturnsDefaultsWhenAbsent() {
     when(preferences.findById(1L)).thenReturn(Optional.empty());
     PreferencesView v = service.getPreferences(1L);

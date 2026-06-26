@@ -41,6 +41,12 @@ public class LcsController {
     return ResponseEntity.ok(lcsService.getSnapshot(uid(jwt), id));
   }
 
+  @GetMapping("/snapshots/by-question/{questionId}")
+  public ResponseEntity<SnapshotView> getByQuestion(
+      @AuthenticationPrincipal Jwt jwt, @PathVariable long questionId) {
+    return ResponseEntity.ok(lcsService.getSnapshotByQuestion(uid(jwt), questionId));
+  }
+
   @GetMapping("/preferences")
   public ResponseEntity<PreferencesView> getPreferences(@AuthenticationPrincipal Jwt jwt) {
     return ResponseEntity.ok(lcsService.getPreferences(uid(jwt)));

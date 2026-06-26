@@ -77,6 +77,26 @@ class LcsControllerTest {
   }
 
   @Test
+  void byQuestionReturns200() throws Exception {
+    when(lcsService.getSnapshotByQuestion(anyLong(), eq(5L)))
+        .thenReturn(new SnapshotView(7L, Instant.now(), Map.of(), "answerer"));
+
+    mvc.perform(get("/lcs/snapshots/by-question/5").with(user("42")))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.id").value(7))
+        .andExpect(jsonPath("$.renderedFor").value("answerer"));
+  }
+
+  @Test
+  void byQuestionMissingReturns404() throws Exception {
+    when(lcsService.getSnapshotByQuestion(anyLong(), eq(404L)))
+        .thenThrow(new ai.devpath.lcs.config.NotFoundException("no snapshot for question: 404"));
+
+    mvc.perform(get("/lcs/snapshots/by-question/404").with(user("42")))
+        .andExpect(status().isNotFound());
+  }
+
+  @Test
   void getPreferencesReturns200() throws Exception {
     when(lcsService.getPreferences(anyLong()))
         .thenReturn(new PreferencesView(true, true, true, false, true, true, "answerers_only"));
