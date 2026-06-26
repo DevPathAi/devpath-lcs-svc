@@ -1,0 +1,26 @@
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/devpath}
+    username: ${DB_USER:devpath}
+    password: ${DB_PASSWORD:localdev}
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  jpa:
+    hibernate:
+      ddl-auto: none
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+devpath:
+  auth:
+    jwt-secret: test-secret-please-change-min-32-bytes-long-0123456789
+  learning:
+    # 테스트 기본(미사용; 단위/웹 테스트는 클라이언트를 mock으로 교체).
+    base-url: http://localhost:9
+    timeout: PT1S
+  sandbox:
+    base-url: http://localhost:9
+    timeout: PT1S

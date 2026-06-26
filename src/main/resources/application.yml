@@ -1,0 +1,38 @@
+spring:
+  application:
+    name: devpath-lcs-svc
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/devpath}
+    username: ${DB_USER:devpath}
+    password: ${DB_PASSWORD:localdev}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate.dialect: org.hibernate.dialect.PostgreSQLDialect
+  flyway:
+    enabled: false   # 마이그레이션은 devpath-shared(중앙)에서 실행, 서비스는 validate만
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+devpath:
+  auth:
+    jwt-secret: ${DEVPATH_AUTH_JWT_SECRET:test-secret-please-change-min-32-bytes-long-0123456789}
+  learning:
+    base-url: ${LEARNING_URI:http://localhost:8082}
+    timeout: ${LEARNING_TIMEOUT:PT5S}
+  sandbox:
+    base-url: ${SANDBOX_URI:http://localhost:8085}
+    timeout: ${SANDBOX_TIMEOUT:PT5S}
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, metrics
