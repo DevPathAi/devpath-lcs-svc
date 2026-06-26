@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.Optional;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
@@ -32,6 +34,23 @@ class LcsJpaTest {
     assertNotNull(saved.getId());
     assertNotNull(saved.getCreatedAt());
     assertEquals("answerers_only", snapshots.findById(saved.getId()).orElseThrow().getVisibility());
+  }
+
+  @Test
+  void findsCommittedSnapshotByQuestion() {
+    LearningContextSnapshot s = new LearningContextSnapshot(
+        42L, "question_attachment", "question", 555L,
+        "{\"current_content\":{\"title\":\"t\"}}", "answerers_only", "[\"current_content\"]");
+    snapshots.save(s);
+
+    Optional<LearningContextSnapshot> found =
+        snapshots.findFirstByAttachedToTypeAndAttachedToIdOrderByCreatedAtDesc("question", 555L);
+    assertTrue(found.isPresent());
+    assertEquals(555L, found.orElseThrow().getAttachedToId());
+
+    assertTrue(snapshots
+        .findFirstByAttachedToTypeAndAttachedToIdOrderByCreatedAtDesc("question", 999L)
+        .isEmpty());
   }
 
   @Test

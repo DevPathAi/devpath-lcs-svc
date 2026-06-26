@@ -29,6 +29,7 @@ public class LcsService {
 
   private static final String DEFAULT_VISIBILITY = "answerers_only";
   private static final String PURPOSE_QUESTION = "question_attachment";
+  private static final String ATTACHED_TYPE_QUESTION = "question";
   private static final Duration DRAFT_TTL = Duration.ofMinutes(10);
 
   private final SnapshotAssembler assembler;
@@ -88,6 +89,24 @@ public class LcsService {
         .orElseThrow(() -> new NotFoundException("snapshot not found: " + id));
     if (!canView(snapshot, userId)) {
       throw new ForbiddenException("not allowed to view snapshot: " + id);
+    }
+    Map<String, Object> content = fromJson(snapshot.getContentSnapshot());
+    return new SnapshotView(snapshot.getId(), snapshot.getCreatedAt(), content, "answerer");
+  }
+
+  /**
+   * 질문에 첨부된 커밋 스냅샷 역조회(답변자 패널용). community 무변경 유지를 위해 questionId로 조회.
+   * 인가는 {@link #getSnapshot}과 동일(public/answerers_only=로그인 전체, private=작성자 본인).
+   */
+  @Transactional(readOnly = true)
+  public SnapshotView getSnapshotByQuestion(long userId, long questionId) {
+    LearningContextSnapshot snapshot =
+        snapshots
+            .findFirstByAttachedToTypeAndAttachedToIdOrderByCreatedAtDesc(
+                ATTACHED_TYPE_QUESTION, questionId)
+            .orElseThrow(() -> new NotFoundException("no snapshot for question: " + questionId));
+    if (!canView(snapshot, userId)) {
+      throw new ForbiddenException("not allowed to view snapshot for question: " + questionId);
     }
     Map<String, Object> content = fromJson(snapshot.getContentSnapshot());
     return new SnapshotView(snapshot.getId(), snapshot.getCreatedAt(), content, "answerer");
