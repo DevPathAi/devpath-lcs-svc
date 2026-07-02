@@ -1,33 +1,44 @@
-# devpath-svc-template
+# devpath-lcs-svc
 
-**DevPath AI** 백엔드 서비스 공통 스켈레톤 템플릿입니다. 새 `devpath-*-svc` 레포는 이 템플릿을 복제해서 시작합니다.
+**DevPath AI** LCS(Learning Context Snapshot) 서비스 — 질문 작성 시 사용자의 현재 학습 맥락을 스냅샷으로 조립해 불변 첨부합니다(MD3 슬라이스 #9).
+
+## 담당 도메인
+
+| 모듈 | 역할 |
+|------|------|
+| draft | 스냅샷 초안 조립(질문 작성 중 미리보기) |
+| domain | 스냅샷·프라이버시 설정 도메인 모델 |
+| client | 학습 시스템 등 소스오브트루스 조회 클라이언트 |
+| service | 스냅샷 draft/commit, preferences 비즈니스 로직 |
+| api | HTTP 엔드포인트 |
+
+## API
+
+| Method | Endpoint | 설명 |
+|--------|----------|------|
+| POST | `/lcs/snapshots/draft` | 질문 작성 시 미리보기 스냅샷 생성 |
+| POST | `/lcs/snapshots/{draftId}/commit` | 질문 게시 시 영속화 |
+| GET | `/lcs/snapshots/{id}` | 스냅샷 조회 |
+| GET | `/lcs/snapshots/by-question/{questionId}` | 질문 ID로 스냅샷 역조회 |
+| GET | `/lcs/preferences` | 유저 프라이버시 설정 조회 |
+| PUT | `/lcs/preferences` | 유저 프라이버시 설정 변경 |
+
+상세 설계: [documents/26_학습맥락_자동첨부_구현](https://github.com/DevPathAi/documents/blob/main/26_학습맥락_자동첨부_구현.md)
 
 ## 구성
 
 - Spring Boot 4.0.x · Java 21 · Gradle (Kotlin DSL)
-- 기본 스타터: WebMVC, Actuator, Validation, Lombok
-- 선택 의존성(JPA + PostgreSQL, Redis, Security, Kafka)은 `build.gradle.kts`에 주석으로 포함 — 서비스 특성에 맞게 해제
-- `docs/project-management/` — [workflow-dashboard](https://github.com/DevPathAi/workflow-dashboard) 동기화 대상 디렉터리
-
-## 새 서비스 만들기
-
-1. 이 레포 내용을 새 레포로 복사
-2. 치환:
-   - `settings.gradle.kts`의 `rootProject.name`
-   - `build.gradle.kts`의 `description`
-   - 패키지 `ai.devpath.template` → `ai.devpath.<도메인>`
-   - 메인 클래스 `SvcTemplateApplication` → `<도메인>Application`
-3. `application.yml`의 `spring.application.name` 수정
-4. 필요한 의존성 주석 해제
+- [devpath-svc-template](https://github.com/DevPathAi/devpath-svc-template) 기반
+- DB: `learning_context_snapshots`, `user_context_preferences` (devpath-shared Flyway, `flyway.enabled: false`로 devpath-shared 중앙 마이그레이션에 위임하고 이 서비스는 validate만)
 
 ## 빌드 / 실행
 
 ```bash
-./gradlew build        # 빌드 + 테스트
-./gradlew bootRun      # 로컬 실행 (기본 포트 8080)
+./gradlew build
+./gradlew bootRun    # 기본 포트 8080 (gateway 라우트 대상은 LCS_SVC_URI, 기본 http://localhost:8087)
 ```
 
-로컬 인프라(PostgreSQL, Redis, Kafka 등)는 [devpath-shared](https://github.com/DevPathAi/devpath-shared)의 docker-compose를 사용합니다.
+로컬 인프라는 [devpath-shared](https://github.com/DevPathAi/devpath-shared)의 docker-compose를 사용합니다.
 
 ## 개발 규칙
 
