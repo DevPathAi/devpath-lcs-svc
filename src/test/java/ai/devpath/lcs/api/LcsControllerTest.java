@@ -12,6 +12,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import ai.devpath.lcs.config.SecurityConfig;
 import ai.devpath.lcs.service.LcsService;
+import ai.devpath.shared.error.ApiExceptionHandler;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -24,7 +25,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(LcsController.class)
-@Import(SecurityConfig.class)
+@Import({SecurityConfig.class, ApiExceptionHandler.class})
 class LcsControllerTest {
 
   @Autowired MockMvc mvc;
@@ -93,7 +94,19 @@ class LcsControllerTest {
         .thenThrow(new ai.devpath.lcs.config.NotFoundException("no snapshot for question: 404"));
 
     mvc.perform(get("/lcs/snapshots/by-question/404").with(user("42")))
-        .andExpect(status().isNotFound());
+        .andExpect(status().isNotFound())
+        // 스펙 §3.4 공통 에러 envelope(공용 ApiExceptionHandler).
+        .andExpect(jsonPath("$.error.code").value("RESOURCE_NOT_FOUND"));
+  }
+
+  @Test
+  void forbiddenReturnsEnvelope() throws Exception {
+    when(lcsService.getSnapshot(anyLong(), eq(9L)))
+        .thenThrow(new ai.devpath.lcs.config.ForbiddenException("not owner"));
+
+    mvc.perform(get("/lcs/snapshots/9").with(user("42")))
+        .andExpect(status().isForbidden())
+        .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
   }
 
   @Test
