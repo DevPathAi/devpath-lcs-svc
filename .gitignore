@@ -35,3 +35,6 @@ out/
 
 ### VS Code ###
 .vscode/
+
+# oh-my-claudecode 도구 상태(세션·hud 등) — 커밋 금지
+.omc/
