@@ -1,8 +1,11 @@
 package ai.devpath.lcs.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -95,6 +98,35 @@ class SnapshotPolicyTest {
         List.of("current_code"), Map.of("current_code", "가".repeat(22_000))));
     assertThrows(IllegalArgumentException.class, () -> SnapshotPolicy.validateRequestContext("mentor_prompt",
         List.of("recent_output"), Map.of("recent_output", Map.of(
-            "stdout", "x".repeat(65_537), "stderr", "", "truncated", true))));
+        "stdout", "x".repeat(65_537), "stderr", "", "truncated", true))));
+  }
+
+  @Test
+  void mentorSourceShapeRejectsNullWrongTypeOversizeAndExtraKeys() {
+    assertTrue(SnapshotPolicy.isValidMentorSourceField("current_content", Map.of(
+        "contentId", 10L, "title", "JPA", "track", "java")));
+    assertFalse(SnapshotPolicy.isValidMentorSourceField("current_content", null));
+    assertFalse(SnapshotPolicy.isValidMentorSourceField("current_content", Map.of(
+        "contentId", "10", "title", "JPA", "track", "java")));
+    assertFalse(SnapshotPolicy.isValidMentorSourceField("current_content", Map.of(
+        "contentId", 10L, "title", "x".repeat(2_049), "track", "java")));
+    assertFalse(SnapshotPolicy.isValidMentorSourceField("current_content", Map.of(
+        "contentId", 10L, "title", "JPA", "track", "java", "body", "secret")));
+
+    assertTrue(SnapshotPolicy.isValidMentorSourceField("recent_activity", List.of(
+        Map.of("language", "JAVA", "status", "COMPLETED"))));
+    assertFalse(SnapshotPolicy.isValidMentorSourceField("recent_activity", null));
+    assertFalse(SnapshotPolicy.isValidMentorSourceField("recent_activity", List.of(
+        Map.of("language", 7, "status", "COMPLETED"))));
+    assertFalse(SnapshotPolicy.isValidMentorSourceField("recent_activity", List.of(
+        Map.of("language", "x".repeat(129), "status", "COMPLETED"))));
+    assertFalse(SnapshotPolicy.isValidMentorSourceField("recent_activity", List.of(
+        Map.of("language", "JAVA", "status", "COMPLETED", "stdout", "secret"))));
+
+    Map<String, Object> nullMetadata = new LinkedHashMap<>();
+    nullMetadata.put("language", null);
+    nullMetadata.put("status", "COMPLETED");
+    assertFalse(SnapshotPolicy.isValidMentorSourceField(
+        "recent_activity", List.of(nullMetadata)));
   }
 }
