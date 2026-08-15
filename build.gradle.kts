@@ -46,6 +46,7 @@ dependencies {
 	testImplementation("org.springframework.boot:spring-boot-flyway")
 	testImplementation("org.flywaydb:flyway-core")
 	testImplementation("org.flywaydb:flyway-database-postgresql")
+	testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
 	testCompileOnly("org.projectlombok:lombok")
 	testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 	testAnnotationProcessor("org.projectlombok:lombok")
