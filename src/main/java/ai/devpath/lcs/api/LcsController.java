@@ -41,6 +41,12 @@ public class LcsController {
     return ResponseEntity.ok(lcsService.getSnapshot(uid(jwt), id));
   }
 
+  @GetMapping("/mentor/snapshots/{id}")
+  public ResponseEntity<MentorSnapshotView> consumeForMentor(
+      @AuthenticationPrincipal Jwt jwt, @PathVariable long id) {
+    return ResponseEntity.ok(lcsService.consumeMentorSnapshot(uid(jwt), id));
+  }
+
   @GetMapping("/snapshots/by-question/{questionId}")
   public ResponseEntity<SnapshotView> getByQuestion(
       @AuthenticationPrincipal Jwt jwt, @PathVariable long questionId) {

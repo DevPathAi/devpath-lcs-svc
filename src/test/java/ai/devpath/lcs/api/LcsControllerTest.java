@@ -2,6 +2,8 @@ package ai.devpath.lcs.api;
 
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -22,10 +24,12 @@ import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(LcsController.class)
 @Import({SecurityConfig.class, ApiExceptionHandler.class})
+@TestPropertySource(properties = "spring.jackson.deserialization.fail-on-unknown-properties=true")
 class LcsControllerTest {
 
   @Autowired MockMvc mvc;
@@ -54,6 +58,17 @@ class LcsControllerTest {
   }
 
   @Test
+  void draftRejectsUnknownTopLevelFieldsBeforeService() throws Exception {
+    mvc.perform(post("/lcs/snapshots/draft").with(user("42"))
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"purpose\":\"mentor_prompt\",\"contentId\":10,"
+                + "\"requestedFields\":[],\"unknown\":\"must fail\"}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"));
+    verify(lcsService, never()).draft(anyLong(), org.mockito.ArgumentMatchers.any());
+  }
+
+  @Test
   void commitReturns201() throws Exception {
     when(lcsService.commit(anyLong(), eq("snap_x"), org.mockito.ArgumentMatchers.any()))
         .thenReturn(new CommitResponse(99L, "committed", true));
@@ -75,6 +90,36 @@ class LcsControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.id").value(5))
         .andExpect(jsonPath("$.renderedFor").value("answerer"));
+  }
+
+  @Test
+  void mentorConsumeReturnsOnlyTheStrictSnapshotEnvelope() throws Exception {
+    when(lcsService.consumeMentorSnapshot(42L, 5L))
+        .thenReturn(new MentorSnapshotView(5L, "mentor_prompt", "private",
+            List.of("current_content"), Map.of("current_content", Map.of("contentId", 10L))));
+
+    mvc.perform(get("/lcs/mentor/snapshots/5").with(user("42")))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.snapshotId").value(5))
+        .andExpect(jsonPath("$.purpose").value("mentor_prompt"))
+        .andExpect(jsonPath("$.visibility").value("private"))
+        .andExpect(jsonPath("$.fieldsIncluded[0]").value("current_content"))
+        .andExpect(jsonPath("$.content.current_content.contentId").value(10))
+        .andExpect(jsonPath("$.createdAt").doesNotExist())
+        .andExpect(jsonPath("$.renderedFor").doesNotExist());
+  }
+
+  @Test
+  void mentorConsumeDenialDoesNotExposeSnapshotIdentityOrContent() throws Exception {
+    when(lcsService.consumeMentorSnapshot(42L, 9L))
+        .thenThrow(new ai.devpath.lcs.config.NotFoundException("mentor snapshot unavailable"));
+
+    mvc.perform(get("/lcs/mentor/snapshots/9").with(user("42")))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.error.code").value("RESOURCE_NOT_FOUND"))
+        .andExpect(jsonPath("$.error.message").value("mentor snapshot unavailable"))
+        .andExpect(jsonPath("$.snapshotId").doesNotExist())
+        .andExpect(jsonPath("$.content").doesNotExist());
   }
 
   @Test
