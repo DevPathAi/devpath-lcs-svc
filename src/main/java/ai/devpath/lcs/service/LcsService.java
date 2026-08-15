@@ -21,6 +21,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.regex.Pattern;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -93,16 +94,22 @@ public class LcsService {
 
     var committed = snapshots.findBySourceDraftId(draftId);
     if (committed.isPresent()) {
-      LearningContextSnapshot snapshot = committed.orElseThrow();
-      requireMentorIdentity(snapshot.getId(), snapshot.getUserId(), snapshot.getPurpose(),
-          snapshot.getVisibility(), userId);
-      rejectMentorCommitOverride(commitRequest);
-      deleteMentorDraftBestEffort(draftId);
-      return committed(snapshot.getId());
+      return replayCommittedMentor(
+          committed.orElseThrow(), userId, draftId, commitRequest);
     }
 
-    Draft draft = draftStore.get(draftId)
-        .orElseThrow(() -> new NotFoundException("draft unavailable"));
+    Optional<Draft> storedDraft = draftStore.get(draftId);
+    if (storedDraft.isEmpty()) {
+      // A concurrent winner commits in REQUIRES_NEW before deleting Redis. Re-read once so a
+      // loser whose initial DB check preceded that commit replays the durable result.
+      var racedCommit = snapshots.findBySourceDraftId(draftId);
+      if (racedCommit.isPresent()) {
+        return replayCommittedMentor(
+            racedCommit.orElseThrow(), userId, draftId, commitRequest);
+      }
+      throw new NotFoundException("draft unavailable");
+    }
+    Draft draft = storedDraft.orElseThrow();
     if (draft.userId() != userId) {
       throw new ForbiddenException("snapshot unavailable");
     }
@@ -125,6 +132,15 @@ public class LcsService {
     LearningContextSnapshot saved = snapshots.save(snapshot);
     draftStore.delete(draftId);
     return committed(saved.getId());
+  }
+
+  private CommitResponse replayCommittedMentor(LearningContextSnapshot snapshot, long userId,
+      String draftId, CommitRequest commitRequest) {
+    requireMentorIdentity(snapshot.getId(), snapshot.getUserId(), snapshot.getPurpose(),
+        snapshot.getVisibility(), userId);
+    rejectMentorCommitOverride(commitRequest);
+    deleteMentorDraftBestEffort(draftId);
+    return committed(snapshot.getId());
   }
 
   private CommitResponse commitMentor(

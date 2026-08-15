@@ -3,7 +3,7 @@ package ai.devpath.lcs.service;
 import ai.devpath.lcs.api.FieldUnavailable;
 import ai.devpath.lcs.client.ContentView;
 import ai.devpath.lcs.client.LearningClient;
-import ai.devpath.lcs.client.RunView;
+import ai.devpath.lcs.client.RunMetadata;
 import ai.devpath.lcs.client.SandboxClient;
 import ai.devpath.lcs.domain.UserContextPreference;
 import java.util.ArrayList;
@@ -79,8 +79,14 @@ public class SnapshotAssembler {
           cc.put("contentId", c.id());
           cc.put("title", c.title());
           cc.put("track", c.track());
-          content.put(CURRENT_CONTENT, cc);
-          included.add(CURRENT_CONTENT);
+          if (SnapshotPolicy.MENTOR_PROMPT.equals(purpose)
+              && (c.id() != contentId
+                  || !SnapshotPolicy.isValidMentorSourceField(CURRENT_CONTENT, cc))) {
+            unavailable.add(new FieldUnavailable(CURRENT_CONTENT, REASON_SOURCE_UNAVAILABLE));
+          } else {
+            content.put(CURRENT_CONTENT, cc);
+            included.add(CURRENT_CONTENT);
+          }
         } else {
           unavailable.add(new FieldUnavailable(CURRENT_CONTENT, REASON_SOURCE_UNAVAILABLE));
         }
@@ -92,19 +98,24 @@ public class SnapshotAssembler {
       if (!prefs.isCollectCurrentContent()) {
         unavailable.add(new FieldUnavailable(RECENT_ACTIVITY, REASON_PREF_OFF));
       } else {
-        Optional<List<RunView>> recent = safeRecent(userId);
+        Optional<List<RunMetadata>> recent = safeRecent(userId);
         if (SnapshotPolicy.MENTOR_PROMPT.equals(purpose) && recent.isEmpty()) {
           unavailable.add(new FieldUnavailable(RECENT_ACTIVITY, REASON_SOURCE_UNAVAILABLE));
         } else {
           List<Map<String, Object>> runs = new ArrayList<>();
-          for (RunView r : recent.orElseGet(List::of)) {
+          for (RunMetadata r : recent.orElseGet(List::of)) {
             Map<String, Object> run = new LinkedHashMap<>();
             run.put("language", r.language());
             run.put("status", r.status());
             runs.add(run);
           }
-          content.put(RECENT_ACTIVITY, runs);
-          included.add(RECENT_ACTIVITY);
+          if (SnapshotPolicy.MENTOR_PROMPT.equals(purpose)
+              && !SnapshotPolicy.isValidMentorSourceField(RECENT_ACTIVITY, runs)) {
+            unavailable.add(new FieldUnavailable(RECENT_ACTIVITY, REASON_SOURCE_UNAVAILABLE));
+          } else {
+            content.put(RECENT_ACTIVITY, runs);
+            included.add(RECENT_ACTIVITY);
+          }
         }
       }
     }
@@ -168,9 +179,9 @@ public class SnapshotAssembler {
     }
   }
 
-  private Optional<List<RunView>> safeRecent(long userId) {
+  private Optional<List<RunMetadata>> safeRecent(long userId) {
     try {
-      return Optional.of(sandboxClient.recentByUser(userId, RECENT_LIMIT));
+      return sandboxClient.recentByUser(userId, RECENT_LIMIT);
     } catch (RuntimeException e) {
       return Optional.empty();
     }

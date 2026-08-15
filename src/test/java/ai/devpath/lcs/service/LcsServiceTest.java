@@ -11,6 +11,7 @@ import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -248,6 +249,43 @@ class LcsServiceTest {
         () -> service.commit(99L, draftId, new CommitRequest(null, null, null)));
     assertEquals("mentor snapshot unavailable", denied.getMessage());
     verify(draftStore, never()).get(anyString());
+  }
+
+  @Test
+  void redisMissRequeriesCommittedMentorSnapshotForSameOwner() {
+    String draftId = "snap_dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+    LearningContextSnapshot existing = mockEntity(
+        93L, 42L, "mentor_prompt", "private", "{\"current_code\":\"safe\"}");
+    when(existing.getSourceDraftId()).thenReturn(draftId);
+    when(snapshots.findBySourceDraftId(draftId))
+        .thenReturn(Optional.empty(), Optional.of(existing));
+    when(draftStore.get(draftId)).thenReturn(Optional.empty());
+
+    CommitResponse replay =
+        service.commit(42L, draftId, new CommitRequest(null, null, null));
+
+    assertEquals(93L, replay.snapshotId());
+    assertTrue(replay.immutable());
+    verify(snapshots, times(2)).findBySourceDraftId(draftId);
+    verify(mentorCommitter, never()).commit(anyLong(), anyString(), anyString(), anyString());
+  }
+
+  @Test
+  void redisMissRequeryStillGenericallyDeniesDifferentOwner() {
+    String draftId = "snap_eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    LearningContextSnapshot existing = mockEntity(
+        94L, 42L, "mentor_prompt", "private", "{\"current_code\":\"safe\"}");
+    when(existing.getSourceDraftId()).thenReturn(draftId);
+    when(snapshots.findBySourceDraftId(draftId))
+        .thenReturn(Optional.empty(), Optional.of(existing));
+    when(draftStore.get(draftId)).thenReturn(Optional.empty());
+
+    ForbiddenException denied = assertThrows(ForbiddenException.class,
+        () -> service.commit(99L, draftId, new CommitRequest(null, null, null)));
+
+    assertEquals("mentor snapshot unavailable", denied.getMessage());
+    verify(snapshots, times(2)).findBySourceDraftId(draftId);
+    verify(mentorCommitter, never()).commit(anyLong(), anyString(), anyString(), anyString());
   }
 
   @Test

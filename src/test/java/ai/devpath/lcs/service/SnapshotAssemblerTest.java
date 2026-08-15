@@ -13,7 +13,7 @@ import static org.mockito.Mockito.when;
 import ai.devpath.lcs.api.FieldUnavailable;
 import ai.devpath.lcs.client.ContentView;
 import ai.devpath.lcs.client.LearningClient;
-import ai.devpath.lcs.client.RunView;
+import ai.devpath.lcs.client.RunMetadata;
 import ai.devpath.lcs.client.SandboxClient;
 import ai.devpath.lcs.domain.UserContextPreference;
 import java.util.List;
@@ -40,7 +40,7 @@ class SnapshotAssemblerTest {
   void currentContentPresentWhenFoundAndPrefOn() {
     when(learning.getContent(10L))
         .thenReturn(Optional.of(new ContentView(10L, "slug", "JPA 기초", "java", "body")));
-    when(sandbox.recentByUser(anyLong(), anyInt())).thenReturn(List.of());
+    when(sandbox.recentByUser(anyLong(), anyInt())).thenReturn(Optional.of(List.of()));
 
     AssemblyResult r = assembler.assemble(1L, 10L, null, prefs());
 
@@ -61,7 +61,7 @@ class SnapshotAssemblerTest {
   void recentActivityPresentWhenPrefOn() {
     when(learning.getContent(anyLong())).thenReturn(Optional.empty());
     when(sandbox.recentByUser(1L, 5))
-        .thenReturn(List.of(new RunView(7L, 1L, "python", null, "code", "out", "", 0, "SUCCESS")));
+        .thenReturn(Optional.of(List.of(new RunMetadata("python", "SUCCESS"))));
 
     AssemblyResult r = assembler.assemble(1L, null, null, prefs());
 
@@ -75,7 +75,7 @@ class SnapshotAssemblerTest {
 
   @Test
   void currentContentUnavailableWhenNoContentId() {
-    when(sandbox.recentByUser(anyLong(), anyInt())).thenReturn(List.of());
+    when(sandbox.recentByUser(anyLong(), anyInt())).thenReturn(Optional.of(List.of()));
 
     AssemblyResult r = assembler.assemble(1L, null, null, prefs());
 
@@ -99,7 +99,7 @@ class SnapshotAssemblerTest {
   @Test
   void currentContentUnavailableWhenClientEmptyGraceful() {
     when(learning.getContent(10L)).thenReturn(Optional.empty());
-    when(sandbox.recentByUser(anyLong(), anyInt())).thenReturn(List.of());
+    when(sandbox.recentByUser(anyLong(), anyInt())).thenReturn(Optional.of(List.of()));
 
     AssemblyResult r = assembler.assemble(1L, 10L, null, prefs());
 
@@ -135,9 +135,8 @@ class SnapshotAssemblerTest {
 
   @Test
   void recentActivityIncludesOnlyLanguageAndStatusMetadata() {
-    RunView upstream = new RunView(7L, 1L, "python", 10L,
-        "SECRET_CODE", "SECRET_OUTPUT", "SECRET_ERROR", 0, "COMPLETED");
-    when(sandbox.recentByUser(1L, 5)).thenReturn(List.of(upstream));
+    RunMetadata upstream = new RunMetadata("python", "COMPLETED");
+    when(sandbox.recentByUser(1L, 5)).thenReturn(Optional.of(List.of(upstream)));
 
     AssemblyResult r = assembler.assemble(
         "mentor_prompt", 1L, 10L, List.of("recent_activity"), Map.of(), prefs());
@@ -217,7 +216,7 @@ class SnapshotAssemblerTest {
   void mentorSandboxSourceFailureKeepsUsableContentAndReportsTheUnavailableField() {
     when(learning.getContent(10L))
         .thenReturn(Optional.of(new ContentView(10L, "slug", "t", "java", "b")));
-    when(sandbox.recentByUser(1L, 5)).thenThrow(new IllegalStateException("sandbox down"));
+    when(sandbox.recentByUser(1L, 5)).thenReturn(Optional.empty());
 
     AssemblyResult result = assembler.assemble("mentor_prompt", 1L, 10L,
         List.of("current_content", "recent_activity"), Map.of(), prefs());
@@ -230,8 +229,60 @@ class SnapshotAssemblerTest {
   }
 
   @Test
+  void mentorRejectsMalformedCurrentContentButKeepsValidRecentActivity() {
+    when(learning.getContent(10L))
+        .thenReturn(Optional.of(new ContentView(11L, "slug", null, "java", "body")));
+    when(sandbox.recentByUser(1L, 5)).thenReturn(Optional.of(List.of(
+        new RunMetadata("java", "COMPLETED"))));
+
+    AssemblyResult result = assembler.assemble("mentor_prompt", 1L, 10L,
+        List.of("current_content", "recent_activity"), Map.of(), prefs());
+
+    assertEquals(List.of("recent_activity"), result.fieldsIncluded());
+    assertFalse(result.content().containsKey("current_content"));
+    assertEquals("source_unavailable",
+        reasonFor(result.fieldsUnavailable(), "current_content"));
+    assertEquals(List.of(Map.of("language", "java", "status", "COMPLETED")),
+        result.content().get("recent_activity"));
+  }
+
+  @Test
+  void mentorRejectsMalformedRecentMetadataButKeepsValidCurrentContent() {
+    when(learning.getContent(10L))
+        .thenReturn(Optional.of(new ContentView(10L, "slug", "title", "java", "body")));
+    when(sandbox.recentByUser(1L, 5)).thenReturn(Optional.of(List.of(
+        new RunMetadata("x".repeat(129), null))));
+
+    AssemblyResult result = assembler.assemble("mentor_prompt", 1L, 10L,
+        List.of("current_content", "recent_activity"), Map.of(), prefs());
+
+    assertEquals(List.of("current_content"), result.fieldsIncluded());
+    assertTrue(result.content().containsKey("current_content"));
+    assertFalse(result.content().containsKey("recent_activity"));
+    assertEquals("source_unavailable",
+        reasonFor(result.fieldsUnavailable(), "recent_activity"));
+  }
+
+  @Test
+  void communityKeepsHistoricalMalformedSourceProjectionBehavior() {
+    when(learning.getContent(10L))
+        .thenReturn(Optional.of(new ContentView(11L, "slug", null, "java", "body")));
+    when(sandbox.recentByUser(1L, 5)).thenReturn(Optional.of(List.of(
+        new RunMetadata(null, null))));
+
+    AssemblyResult result = assembler.assemble(
+        1L, 10L, List.of("current_content", "recent_activity"), prefs());
+
+    assertEquals(List.of("current_content", "recent_activity"), result.fieldsIncluded());
+    assertTrue(result.content().containsKey("current_content"));
+    assertTrue(result.content().containsKey("recent_activity"));
+    assertEquals(null, reasonFor(result.fieldsUnavailable(), "current_content"));
+    assertEquals(null, reasonFor(result.fieldsUnavailable(), "recent_activity"));
+  }
+
+  @Test
   void communitySandboxFailureKeepsItsHistoricalEmptyRecentActivityBehavior() {
-    when(sandbox.recentByUser(1L, 5)).thenThrow(new IllegalStateException("sandbox down"));
+    when(sandbox.recentByUser(1L, 5)).thenReturn(Optional.empty());
 
     AssemblyResult result = assembler.assemble(
         1L, null, List.of("recent_activity"), prefs());

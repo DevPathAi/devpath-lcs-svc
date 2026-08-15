@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Duration;
+import java.util.List;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import org.junit.jupiter.api.AfterEach;
@@ -29,16 +30,17 @@ class SandboxClientTest {
   void recentRequestCarriesExactInternalToken() throws Exception {
     server.enqueue(new MockResponse()
         .setHeader("Content-Type", "application/json")
-        .setBody("[{\"id\":7,\"userId\":42,\"language\":\"PYTHON\","
-            + "\"contentId\":null,\"submittedCode\":\"print(1)\",\"stdout\":\"1\","
-            + "\"stderr\":\"\",\"exitCode\":0,\"status\":\"COMPLETED\"}]"));
+        .setBody("[{\"language\":\"PYTHON\",\"status\":\"COMPLETED\"}]"));
     var client = new SandboxClient(
         server.url("/").toString(), Duration.ofSeconds(5), "test-internal-token");
 
-    assertThat(client.recentByUser(42L, 5)).hasSize(1);
+    assertThat(client.recentByUser(42L, 5))
+        .contains(List.of(new RunMetadata("PYTHON", "COMPLETED")));
     var request = server.takeRequest();
     assertThat(request.getHeader("X-DevPath-Internal-Token"))
         .isEqualTo("test-internal-token");
+    assertThat(request.getPath())
+        .isEqualTo("/internal/sandbox/sessions/recent/metadata?userId=42&limit=5");
   }
 
   @Test
@@ -53,11 +55,43 @@ class SandboxClientTest {
   }
 
   @Test
-  void networkErrorStillReturnsEmptyAfterTokenValidation() {
-    server.enqueue(new MockResponse().setResponseCode(500));
+  void notFoundAndServerErrorReturnUnavailableWithoutRawFallback() throws Exception {
+    var client = new SandboxClient(
+        server.url("/").toString(), Duration.ofSeconds(5), "test-internal-token");
+
+    for (int status : new int[] {404, 503}) {
+      server.enqueue(new MockResponse().setResponseCode(status));
+      assertThat(client.recentByUser(42L, 5)).isEmpty();
+      assertThat(server.takeRequest().getPath())
+          .isEqualTo("/internal/sandbox/sessions/recent/metadata?userId=42&limit=5");
+    }
+    assertThat(server.getRequestCount()).isEqualTo(2);
+  }
+
+  @Test
+  void validEmptyMetadataIsDistinguishedFromAnUnavailableSource() {
+    server.enqueue(new MockResponse()
+        .setHeader("Content-Type", "application/json")
+        .setBody("[]"));
+    var client = new SandboxClient(
+        server.url("/").toString(), Duration.ofSeconds(5), "test-internal-token");
+
+    assertThat(client.recentByUser(42L, 5)).contains(List.of());
+  }
+
+  @Test
+  void rawOrMalformedMetadataFailsClosedWithoutCallingTheLegacyEndpoint() throws Exception {
+    server.enqueue(new MockResponse()
+        .setHeader("Content-Type", "application/json")
+        .setBody("[{\"language\":\"JAVA\",\"status\":\"COMPLETED\","
+            + "\"submittedCode\":\"SECRET_CODE\",\"stdout\":\"SECRET_STDOUT\","
+            + "\"stderr\":\"SECRET_STDERR\"}]"));
     var client = new SandboxClient(
         server.url("/").toString(), Duration.ofSeconds(5), "test-internal-token");
 
     assertThat(client.recentByUser(42L, 5)).isEmpty();
+    assertThat(server.takeRequest().getPath())
+        .isEqualTo("/internal/sandbox/sessions/recent/metadata?userId=42&limit=5");
+    assertThat(server.getRequestCount()).isEqualTo(1);
   }
 }

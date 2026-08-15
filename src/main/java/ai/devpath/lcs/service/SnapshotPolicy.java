@@ -125,6 +125,16 @@ final class SnapshotPolicy {
     }
   }
 
+  /** Uses the committed Mentor boundary as the single field-shape authority during assembly. */
+  static boolean isValidMentorSourceField(String field, Object value) {
+    try {
+      validateCommittedMentorContent(List.of(field), Map.of(field, value));
+      return true;
+    } catch (RuntimeException e) {
+      return false;
+    }
+  }
+
   private static void currentContent(Object value) {
     Map<String, Object> map = stringKeyedMap(value, CURRENT_CONTENT);
     requireExactKeys(map, Set.of("contentId", "title", "track"), CURRENT_CONTENT);
