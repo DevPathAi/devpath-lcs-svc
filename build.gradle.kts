@@ -8,6 +8,9 @@ group = "ai.devpath"
 version = "0.0.1-SNAPSHOT"
 description = "DevPath AI LCS service (learning context snapshots)"
 
+val devpathSharedVersion = providers.gradleProperty("devpathSharedVersion").get()
+val devpathSharedCoordinate = "ai.devpath:devpath-shared:$devpathSharedVersion"
+
 java {
 	toolchain {
 		languageVersion = JavaLanguageVersion.of(21)
@@ -15,8 +18,10 @@ java {
 }
 
 repositories {
+	providers.gradleProperty("immutableSharedRepository").orNull?.let { repository ->
+		maven { url = uri(repository) }
+	}
 	mavenCentral()
-	mavenLocal()
 	maven {
 		url = uri("https://maven.pkg.github.com/DevPathAi/devpath-shared")
 		credentials {
@@ -34,7 +39,7 @@ dependencies {
 	implementation("org.springframework.boot:spring-boot-starter-data-redis")
 	implementation("org.springframework.boot:spring-boot-starter-security")
 	implementation("org.springframework.boot:spring-boot-starter-oauth2-resource-server")
-	implementation("ai.devpath:devpath-shared:0.0.1-SNAPSHOT")
+	implementation(devpathSharedCoordinate)
 	runtimeOnly("org.postgresql:postgresql")
 	compileOnly("org.projectlombok:lombok")
 	annotationProcessor("org.projectlombok:lombok")
