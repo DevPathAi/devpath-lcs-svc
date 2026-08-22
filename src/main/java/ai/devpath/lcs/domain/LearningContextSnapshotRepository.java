@@ -9,4 +9,9 @@ public interface LearningContextSnapshotRepository
   /** 질문에 첨부된 커밋 스냅샷(불변·1건 가정, 다건이면 최신). 인덱스 (attached_to_type, attached_to_id). */
   Optional<LearningContextSnapshot> findFirstByAttachedToTypeAndAttachedToIdOrderByCreatedAtDesc(
       String attachedToType, Long attachedToId);
+
+  Optional<LearningContextSnapshot> findBySourceDraftId(String sourceDraftId);
+
+  Optional<LearningContextSnapshot> findByIdAndUserIdAndPurposeAndVisibility(
+      Long id, Long userId, String purpose, String visibility);
 }

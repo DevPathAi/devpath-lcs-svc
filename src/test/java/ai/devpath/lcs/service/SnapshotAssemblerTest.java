@@ -6,12 +6,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import ai.devpath.lcs.api.FieldUnavailable;
 import ai.devpath.lcs.client.ContentView;
 import ai.devpath.lcs.client.LearningClient;
-import ai.devpath.lcs.client.RunView;
+import ai.devpath.lcs.client.RunMetadata;
 import ai.devpath.lcs.client.SandboxClient;
 import ai.devpath.lcs.domain.UserContextPreference;
 import java.util.List;
@@ -38,7 +40,7 @@ class SnapshotAssemblerTest {
   void currentContentPresentWhenFoundAndPrefOn() {
     when(learning.getContent(10L))
         .thenReturn(Optional.of(new ContentView(10L, "slug", "JPA 기초", "java", "body")));
-    when(sandbox.recentByUser(anyLong(), anyInt())).thenReturn(List.of());
+    when(sandbox.recentByUser(anyLong(), anyInt())).thenReturn(Optional.of(List.of()));
 
     AssemblyResult r = assembler.assemble(1L, 10L, null, prefs());
 
@@ -59,7 +61,7 @@ class SnapshotAssemblerTest {
   void recentActivityPresentWhenPrefOn() {
     when(learning.getContent(anyLong())).thenReturn(Optional.empty());
     when(sandbox.recentByUser(1L, 5))
-        .thenReturn(List.of(new RunView(7L, 1L, "python", null, "code", "out", "", 0, "SUCCESS")));
+        .thenReturn(Optional.of(List.of(new RunMetadata("python", "SUCCESS"))));
 
     AssemblyResult r = assembler.assemble(1L, null, null, prefs());
 
@@ -73,7 +75,7 @@ class SnapshotAssemblerTest {
 
   @Test
   void currentContentUnavailableWhenNoContentId() {
-    when(sandbox.recentByUser(anyLong(), anyInt())).thenReturn(List.of());
+    when(sandbox.recentByUser(anyLong(), anyInt())).thenReturn(Optional.of(List.of()));
 
     AssemblyResult r = assembler.assemble(1L, null, null, prefs());
 
@@ -97,7 +99,7 @@ class SnapshotAssemblerTest {
   @Test
   void currentContentUnavailableWhenClientEmptyGraceful() {
     when(learning.getContent(10L)).thenReturn(Optional.empty());
-    when(sandbox.recentByUser(anyLong(), anyInt())).thenReturn(List.of());
+    when(sandbox.recentByUser(anyLong(), anyInt())).thenReturn(Optional.of(List.of()));
 
     AssemblyResult r = assembler.assemble(1L, 10L, null, prefs());
 
@@ -116,5 +118,177 @@ class SnapshotAssemblerTest {
     assertFalse(r.fieldsIncluded().contains("recent_activity"));
     assertEquals(null, reasonFor(r.fieldsUnavailable(), "recent_activity"));
     assertEquals(null, reasonFor(r.fieldsUnavailable(), "active_tags"));
+  }
+
+  @Test
+  void mentorSafeDefaultNeverPullsRecentSandboxRuns() {
+    when(learning.getContent(10L))
+        .thenReturn(Optional.of(new ContentView(10L, "slug", "t", "java", "b")));
+
+    AssemblyResult r = assembler.assemble("mentor_prompt", 1L, 10L,
+        SnapshotPolicy.normalizeRequestedFields("mentor_prompt", List.of()), Map.of(), prefs());
+
+    assertEquals(List.of("current_content"), r.fieldsIncluded());
+    assertEquals(List.of("current_content"), List.copyOf(r.content().keySet()));
+    verify(sandbox, never()).recentByUser(anyLong(), anyInt());
+  }
+
+  @Test
+  void recentActivityIncludesOnlyLanguageAndStatusMetadata() {
+    RunMetadata upstream = new RunMetadata("python", "COMPLETED");
+    when(sandbox.recentByUser(1L, 5)).thenReturn(Optional.of(List.of(upstream)));
+
+    AssemblyResult r = assembler.assemble(
+        "mentor_prompt", 1L, 10L, List.of("recent_activity"), Map.of(), prefs());
+
+    @SuppressWarnings("unchecked")
+    List<Map<String, Object>> runs =
+        (List<Map<String, Object>>) r.content().get("recent_activity");
+    assertEquals(Map.of("language", "python", "status", "COMPLETED"), runs.getFirst());
+  }
+
+  @Test
+  void explicitRequestContextIsIncludedExactlyAndDefaultsRemainOff() {
+    Map<String, Object> context = Map.of(
+        "current_code", "print('한글')",
+        "recent_output", Map.of("stdout", "ok", "stderr", "", "truncated", false),
+        "review_summary", Map.of("confidence", 80, "strengths", List.of("clear"),
+            "improvements", List.of(), "security", List.of()));
+
+    AssemblyResult defaultResult = assembler.assemble("mentor_prompt", 1L, 10L,
+        SnapshotPolicy.normalizeRequestedFields("mentor_prompt", List.of()), Map.of(), prefs());
+    assertFalse(defaultResult.content().containsKey("current_code"));
+    assertFalse(defaultResult.content().containsKey("recent_output"));
+    assertFalse(defaultResult.content().containsKey("review_summary"));
+
+    AssemblyResult selected = assembler.assemble("mentor_prompt", 1L, 10L,
+        List.of("current_code", "recent_output", "review_summary"), context, prefs());
+    assertEquals(context, selected.content());
+    assertEquals(List.of("current_code", "recent_output", "review_summary"),
+        selected.fieldsIncluded());
+  }
+
+  @Test
+  void currentCodeOptInIsConsumedByOneDraftAndNeverReusedByTheNextDraft() {
+    AssemblyResult first = assembler.assemble(
+        "mentor_prompt", 1L, 10L, List.of("current_code"),
+        Map.of("current_code", "print('one request only')"), prefs());
+    AssemblyResult next = assembler.assemble("mentor_prompt", 1L, 10L,
+        SnapshotPolicy.normalizeRequestedFields("mentor_prompt", List.of()), Map.of(), prefs());
+
+    assertEquals("print('one request only')", first.content().get("current_code"));
+    assertFalse(next.content().containsKey("current_code"));
+    assertFalse(next.fieldsIncluded().contains("current_code"));
+    verify(sandbox, never()).recentByUser(anyLong(), anyInt());
+  }
+
+  @Test
+  void recentErrorsRequirePersistentPreferenceAndOneRequestSelection() {
+    Map<String, Object> context = Map.of("recent_errors", List.of("sanitized error"));
+
+    AssemblyResult off = assembler.assemble(
+        "mentor_prompt", 1L, null, List.of("recent_errors"), context, prefs());
+    assertFalse(off.content().containsKey("recent_errors"));
+    assertEquals("user_preference_off", reasonFor(off.fieldsUnavailable(), "recent_errors"));
+
+    UserContextPreference enabled = prefs();
+    enabled.setCollectRecentErrors(true);
+    AssemblyResult on = assembler.assemble(
+        "mentor_prompt", 1L, null, List.of("recent_errors"), context, enabled);
+    assertEquals(List.of("sanitized error"), on.content().get("recent_errors"));
+    assertEquals(List.of("recent_errors"), on.fieldsIncluded());
+  }
+
+  @Test
+  void missingRequestContextIsReportedWithoutDiscardingUsablePreview() {
+    when(learning.getContent(10L))
+        .thenReturn(Optional.of(new ContentView(10L, "slug", "t", "java", "b")));
+
+    AssemblyResult r = assembler.assemble("mentor_prompt", 1L, 10L,
+        List.of("current_content", "current_code"), Map.of(), prefs());
+
+    assertTrue(r.content().containsKey("current_content"));
+    assertFalse(r.content().containsKey("current_code"));
+    assertEquals("request_context_missing", reasonFor(r.fieldsUnavailable(), "current_code"));
+  }
+
+  @Test
+  void mentorSandboxSourceFailureKeepsUsableContentAndReportsTheUnavailableField() {
+    when(learning.getContent(10L))
+        .thenReturn(Optional.of(new ContentView(10L, "slug", "t", "java", "b")));
+    when(sandbox.recentByUser(1L, 5)).thenReturn(Optional.empty());
+
+    AssemblyResult result = assembler.assemble("mentor_prompt", 1L, 10L,
+        List.of("current_content", "recent_activity"), Map.of(), prefs());
+
+    assertEquals(List.of("current_content"), result.fieldsIncluded());
+    assertTrue(result.content().containsKey("current_content"));
+    assertFalse(result.content().containsKey("recent_activity"));
+    assertEquals("source_unavailable",
+        reasonFor(result.fieldsUnavailable(), "recent_activity"));
+  }
+
+  @Test
+  void mentorRejectsMalformedCurrentContentButKeepsValidRecentActivity() {
+    when(learning.getContent(10L))
+        .thenReturn(Optional.of(new ContentView(11L, "slug", null, "java", "body")));
+    when(sandbox.recentByUser(1L, 5)).thenReturn(Optional.of(List.of(
+        new RunMetadata("java", "COMPLETED"))));
+
+    AssemblyResult result = assembler.assemble("mentor_prompt", 1L, 10L,
+        List.of("current_content", "recent_activity"), Map.of(), prefs());
+
+    assertEquals(List.of("recent_activity"), result.fieldsIncluded());
+    assertFalse(result.content().containsKey("current_content"));
+    assertEquals("source_unavailable",
+        reasonFor(result.fieldsUnavailable(), "current_content"));
+    assertEquals(List.of(Map.of("language", "java", "status", "COMPLETED")),
+        result.content().get("recent_activity"));
+  }
+
+  @Test
+  void mentorRejectsMalformedRecentMetadataButKeepsValidCurrentContent() {
+    when(learning.getContent(10L))
+        .thenReturn(Optional.of(new ContentView(10L, "slug", "title", "java", "body")));
+    when(sandbox.recentByUser(1L, 5)).thenReturn(Optional.of(List.of(
+        new RunMetadata("x".repeat(129), null))));
+
+    AssemblyResult result = assembler.assemble("mentor_prompt", 1L, 10L,
+        List.of("current_content", "recent_activity"), Map.of(), prefs());
+
+    assertEquals(List.of("current_content"), result.fieldsIncluded());
+    assertTrue(result.content().containsKey("current_content"));
+    assertFalse(result.content().containsKey("recent_activity"));
+    assertEquals("source_unavailable",
+        reasonFor(result.fieldsUnavailable(), "recent_activity"));
+  }
+
+  @Test
+  void communityKeepsHistoricalMalformedSourceProjectionBehavior() {
+    when(learning.getContent(10L))
+        .thenReturn(Optional.of(new ContentView(11L, "slug", null, "java", "body")));
+    when(sandbox.recentByUser(1L, 5)).thenReturn(Optional.of(List.of(
+        new RunMetadata(null, null))));
+
+    AssemblyResult result = assembler.assemble(
+        1L, 10L, List.of("current_content", "recent_activity"), prefs());
+
+    assertEquals(List.of("current_content", "recent_activity"), result.fieldsIncluded());
+    assertTrue(result.content().containsKey("current_content"));
+    assertTrue(result.content().containsKey("recent_activity"));
+    assertEquals(null, reasonFor(result.fieldsUnavailable(), "current_content"));
+    assertEquals(null, reasonFor(result.fieldsUnavailable(), "recent_activity"));
+  }
+
+  @Test
+  void communitySandboxFailureKeepsItsHistoricalEmptyRecentActivityBehavior() {
+    when(sandbox.recentByUser(1L, 5)).thenReturn(Optional.empty());
+
+    AssemblyResult result = assembler.assemble(
+        1L, null, List.of("recent_activity"), prefs());
+
+    assertEquals(List.of("recent_activity"), result.fieldsIncluded());
+    assertEquals(List.of(), result.content().get("recent_activity"));
+    assertEquals(null, reasonFor(result.fieldsUnavailable(), "recent_activity"));
   }
 }

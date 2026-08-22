@@ -6,6 +6,8 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
+    postgresql:
+      transactional-lock: false
   jpa:
     hibernate:
       ddl-auto: none
@@ -17,6 +19,7 @@ spring:
 devpath:
   auth:
     jwt-secret: test-secret-please-change-min-32-bytes-long-0123456789
+    internal-token: test-internal-token
   learning:
     # 테스트 기본(미사용; 단위/웹 테스트는 클라이언트를 mock으로 교체).
     base-url: http://localhost:9
