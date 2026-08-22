@@ -46,6 +46,9 @@ public class LearningContextSnapshot {
   @Column(name = "fields_included", nullable = false)
   private String fieldsIncluded;
 
+  @Column(name = "source_draft_id", length = 41, updatable = false)
+  private String sourceDraftId;
+
   @Column(name = "created_at", nullable = false, updatable = false)
   private Instant createdAt;
 
@@ -55,6 +58,13 @@ public class LearningContextSnapshot {
 
   public LearningContextSnapshot(Long userId, String purpose, String attachedToType,
       Long attachedToId, String contentSnapshot, String visibility, String fieldsIncluded) {
+    this(userId, purpose, attachedToType, attachedToId, contentSnapshot, visibility,
+        fieldsIncluded, null);
+  }
+
+  public LearningContextSnapshot(Long userId, String purpose, String attachedToType,
+      Long attachedToId, String contentSnapshot, String visibility, String fieldsIncluded,
+      String sourceDraftId) {
     this.userId = userId;
     this.purpose = purpose;
     this.attachedToType = attachedToType;
@@ -62,6 +72,7 @@ public class LearningContextSnapshot {
     this.contentSnapshot = contentSnapshot;
     this.visibility = visibility;
     this.fieldsIncluded = fieldsIncluded;
+    this.sourceDraftId = sourceDraftId;
     this.createdAt = Instant.now();
   }
 
@@ -95,6 +106,10 @@ public class LearningContextSnapshot {
 
   public String getFieldsIncluded() {
     return fieldsIncluded;
+  }
+
+  public String getSourceDraftId() {
+    return sourceDraftId;
   }
 
   public Instant getCreatedAt() {

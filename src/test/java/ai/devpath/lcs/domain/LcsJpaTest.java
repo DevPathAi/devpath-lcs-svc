@@ -3,13 +3,23 @@ package ai.devpath.lcs.domain;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.devpath.lcs.service.MentorCommitResult;
+import ai.devpath.lcs.service.MentorSnapshotCommitter;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import javax.sql.DataSource;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
+import org.springframework.context.annotation.Import;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
 
@@ -20,10 +30,13 @@ import org.springframework.test.context.TestPropertySource;
 @DataJpaTest
 @TestPropertySource(properties = "spring.test.database.replace=none")
 @ActiveProfiles("test")
+@Import(MentorSnapshotCommitter.class)
 class LcsJpaTest {
 
   @Autowired LearningContextSnapshotRepository snapshots;
   @Autowired UserContextPreferenceRepository preferences;
+  @Autowired MentorSnapshotCommitter mentorCommitter;
+  @Autowired DataSource dataSource;
 
   @Test
   void savesAndReadsSnapshot() {
@@ -63,5 +76,57 @@ class LcsJpaTest {
     assertEquals("answerers_only", found.getDefaultVisibility());
     assertNotNull(found.getCreatedAt());
     assertNotNull(found.getUpdatedAt());
+  }
+
+  @Test
+  void concurrentMentorCommitReplaysOneDatabaseSnapshot() throws Exception {
+    String draftId = "snap_33333333-3333-4333-8333-333333333333";
+    deleteByDraftId(draftId);
+    int workers = 8;
+    var start = new CountDownLatch(1);
+    var executor = Executors.newFixedThreadPool(workers);
+    var futures = new ArrayList<java.util.concurrent.Future<MentorCommitResult>>();
+    try {
+      for (int i = 0; i < workers; i++) {
+        futures.add(executor.submit(() -> {
+          start.await();
+          return mentorCommitter.commit(42L, draftId,
+              "{\"current_code\":\"print(1)\"}", "[\"current_code\"]");
+        }));
+      }
+      start.countDown();
+      HashSet<Long> ids = new HashSet<>();
+      for (var future : futures) {
+        MentorCommitResult result = future.get();
+        assertEquals(42L, result.userId());
+        assertEquals("mentor_prompt", result.purpose());
+        assertEquals("private", result.visibility());
+        ids.add(result.snapshotId());
+      }
+      assertEquals(1, ids.size(), "all concurrent commits must return the same snapshot ID");
+      LearningContextSnapshot stored = snapshots.findBySourceDraftId(draftId).orElseThrow();
+      assertEquals(ids.iterator().next(), stored.getId());
+      assertEquals("{\"current_code\": \"print(1)\"}", stored.getContentSnapshot());
+      assertEquals("[\"current_code\"]", stored.getFieldsIncluded());
+    } finally {
+      executor.shutdownNow();
+      deleteByDraftId(draftId);
+    }
+  }
+
+  @Test
+  void failedMentorInsertLeavesNoCommittedReplayRow() {
+    String invalidDraftId = "SNAP_44444444-4444-4444-8444-444444444444";
+    assertThrows(DataIntegrityViolationException.class, () -> mentorCommitter.commit(
+        42L, invalidDraftId, "{}", "[]"));
+    assertTrue(snapshots.findBySourceDraftId(invalidDraftId).isEmpty());
+  }
+
+  private void deleteByDraftId(String draftId) throws Exception {
+    try (var c = dataSource.getConnection(); var ps = c.prepareStatement(
+        "DELETE FROM learning_context_snapshots WHERE source_draft_id=?")) {
+      ps.setString(1, draftId);
+      ps.executeUpdate();
+    }
   }
 }
