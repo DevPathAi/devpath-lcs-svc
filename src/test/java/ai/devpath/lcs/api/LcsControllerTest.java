@@ -13,6 +13,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import ai.devpath.lcs.config.SecurityConfig;
+import ai.devpath.lcs.release.ReleasePreviewRegistry;
 import ai.devpath.lcs.service.LcsService;
 import ai.devpath.shared.error.ApiExceptionHandler;
 import java.time.Instant;
@@ -34,6 +35,7 @@ class LcsControllerTest {
 
   @Autowired MockMvc mvc;
   @MockitoBean LcsService lcsService;
+  @MockitoBean ReleasePreviewRegistry releasePreview;
 
   private static org.springframework.test.web.servlet.request.RequestPostProcessor user(String sub) {
     return jwt().jwt(j -> j.subject(sub));
@@ -55,6 +57,27 @@ class LcsControllerTest {
             .content("{\"purpose\":\"question_attachment\",\"contentId\":10,\"requestedFields\":[]}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.draftId").value("snap_x"));
+  }
+
+  @Test
+  void mentorDraftBindsTheReleaseHeadersOnlyAfterAssemblySucceeds() throws Exception {
+    DraftResponse response = new DraftResponse(
+        "snap_12345678-1234-4123-8123-123456789abc",
+        Instant.now().plusSeconds(600), Map.of(), List.of(), List.of());
+    when(lcsService.draft(anyLong(), org.mockito.ArgumentMatchers.any()))
+        .thenReturn(response);
+    String candidate = "a".repeat(64);
+    String run = "R".repeat(43);
+
+    mvc.perform(post("/lcs/snapshots/draft").with(user("42"))
+            .header("X-Candidate-Spec-Sha256", candidate)
+            .header("X-Release-Run-Key", run)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"purpose\":\"mentor_prompt\",\"requestedFields\":[]}"))
+        .andExpect(status().isOk());
+
+    verify(releasePreview).record(
+        eq(candidate), eq(run), eq(42L), org.mockito.ArgumentMatchers.any(), eq(response));
   }
 
   @Test
