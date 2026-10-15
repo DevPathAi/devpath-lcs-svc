@@ -1,6 +1,6 @@
 # devpath-lcs-svc
 
-**DevPath AI** LCS(Learning Context Snapshot) 서비스 — 질문 작성 시 사용자의 현재 학습 맥락을 스냅샷으로 조립해 불변 첨부합니다(MD3 슬라이스 #9).
+**레바(Leva)** LCS(Learning Context Snapshot) 서비스 — 질문 작성 시 사용자의 현재 학습 맥락을 스냅샷으로 조립해 불변 첨부합니다(MD3 슬라이스 #9).
 
 ## 담당 도메인
 
